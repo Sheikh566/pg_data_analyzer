@@ -1,21 +1,19 @@
 import re, os
-import psycopg2
-from psycopg2.extras import RealDictCursor, RealDictRow
+import psycopg
+from psycopg.rows import dict_row
 
 from dotenv import load_dotenv
-
 load_dotenv()
 
+pg_uri = os.getenv("DB_URL")
+
+if pg_uri is None:
+    raise ValueError("DB_URL environment variable is not set. Please set it to your PostgreSQL connection string.")
+
+conn_dict = psycopg.conninfo.conninfo_to_dict(pg_uri)
 
 def get_connection():
-    return psycopg2.connect(
-        dbname=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        host=os.getenv("DB_HOST"),
-        port=os.getenv("DB_PORT"),
-    )
-
+    return psycopg.connect(**conn_dict, row_factory=dict_row)
 
 def validate_select_query(query: str) -> bool:
     """
@@ -44,7 +42,7 @@ def validate_select_query(query: str) -> bool:
 
     return True
 
-def execute_query(query: str) -> dict[str, list[RealDictRow]]:
+def execute_query(query: str) -> dict[str, list[dict]]:
     """
     Execute a SQL SELECT query against the database.
     
@@ -57,10 +55,9 @@ def execute_query(query: str) -> dict[str, list[RealDictRow]]:
     
     try:
         with get_connection() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query)
-                results = cursor.fetchall()
-                return { 'result': results }
+            cur = conn.execute(query)
+            results = cur.fetchall()
+            return { 'result': results }
     except Exception as e:
         raise RuntimeError(f"Query execution failed: {str(e)}")
 
@@ -73,44 +70,43 @@ def get_database_schema() -> dict:
     """
     try:
         with get_connection() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                # Get table names and basic column info
-                cursor.execute(f"""
-                    SELECT
-                        table_name,
-                        column_name,
-                        data_type,
-                        is_nullable
-                    FROM information_schema.columns 
-                    WHERE table_schema = '{os.getenv("DB_SCHEMA", "public")}'
-                    ORDER BY table_name, ordinal_position
-                """)
-                
-                schema_info = cursor.fetchall()
+            # Get table names and basic column info
+            cur = conn.execute(f"""
+                SELECT
+                    table_name,
+                    column_name,
+                    data_type,
+                    is_nullable
+                FROM information_schema.columns 
+                WHERE table_schema = '{os.getenv("DB_SCHEMA", "public")}'
+                ORDER BY table_name, ordinal_position
+            """)
+            
+            schema_info = cur.fetchall()
 
-                # Format schema information
-                tables: dict[str, list[dict[str, str]]] = {}
-                for row in schema_info:
-                    table_name = row['table_name']
-                    if table_name not in tables:
-                        tables[table_name] = []
-                    tables[table_name].append({
-                        'column': row['column_name'],
-                        'type': row['data_type'],
-                        'nullable': row['is_nullable']
-                    })
-                
-                schema_text = "Database Schema:\n"
-                for table_name, columns in tables.items():
-                    schema_text += f"\nTable: {table_name}\n"
-                    for col in columns:
-                        nullable = "NULL" if col['nullable'] == 'YES' else "NOT NULL"
-                        schema_text += f"  - {col['column']} ({col['type']}, {nullable})\n"
+            # Format schema information
+            tables: dict[str, list[dict[str, str]]] = {}
+            for row in schema_info:
+                table_name = row['table_name']
+                if table_name not in tables:
+                    tables[table_name] = []
+                tables[table_name].append({
+                    'column': row['column_name'],
+                    'type': row['data_type'],
+                    'nullable': row['is_nullable']
+                })
+            
+            schema_text = "Database Schema:\n"
+            for table_name, columns in tables.items():
+                schema_text += f"\nTable: {table_name}\n"
+                for col in columns:
+                    nullable = "NULL" if col['nullable'] == 'YES' else "NOT NULL"
+                    schema_text += f"  - {col['column']} ({col['type']}, {nullable})\n"
                 
             return { 'schema': schema_text }
     except Exception as e:
         return { 'error': f"Encountered an error: {str(e)}" }
 
 if __name__ == "__main__":
-    # list all table names
-    print(execute_query("""SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"""))
+    # test: list all table names
+    print(execute_query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"))

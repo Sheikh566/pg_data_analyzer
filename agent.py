@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MODEL_NAME = os.getenv("MODEL_GEMINI_2_5_FLASH", "gemini-2.0-flash")
+MODEL_NAME = os.getenv("MODEL_GEMINI", "gemini-2.0-flash")
 
 query_generator_agent = LlmAgent(
     name="QueryGenerator",
